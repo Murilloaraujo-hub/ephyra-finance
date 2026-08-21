@@ -19,7 +19,7 @@ const EphyraOnboarding = (() => {
       id: 'welcome',
       title: 'Bem-vindo ao Ephyra Finance',
       description: 'O Ephyra Finance foi criado para ajudar você a entender, organizar e acompanhar sua vida financeira de forma simples. Desenvolvido com uma proposta moderna, gamificada e independente de servidores, você terá total privacidade para dominar suas finanças.',
-      image: 'tutorial-welcome.png',
+      image: 'tutorialwelcome.png',
       icon: 'fa-hand-wave',
       iconChar: '👋'
     },
@@ -120,7 +120,7 @@ const EphyraOnboarding = (() => {
 
     // We build a highly elegant, customizable image block that tries to load the asset,
     // but falls back to a gorgeous placeholder card with premium dark gradients if the file isn't present yet.
-    const imagePath = `./assets/tutorial/${step.image}`;
+    const imagePath = `./${step.image}`;
 
     return `
       <div class="onboarding-card anim-scale">
