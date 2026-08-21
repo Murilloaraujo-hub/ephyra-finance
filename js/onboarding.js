@@ -19,7 +19,7 @@ const EphyraOnboarding = (() => {
       id: 'welcome',
       title: 'Bem-vindo ao Ephyra Finance',
       description: 'O Ephyra Finance foi criado para ajudar você a entender, organizar e acompanhar sua vida financeira de forma simples. Desenvolvido com uma proposta moderna, gamificada e independente de servidores, você terá total privacidade para dominar suas finanças.',
-      image: 'tutorial-welcome.png',
+      image: '/tutorial-welcome.png',
       icon: 'fa-hand-wave',
       iconChar: '👋'
     },
