@@ -307,7 +307,7 @@ a{text-decoration:none;color:inherit}ul{list-style:none}
 <script src="./js/market/market.js?v=20250207v1"></script>
 <script src="./js/sidebar/sidebar.js?v=20250207v1"></script>
 <script src="./js/monthly-summary.js?v=20250207v1"></script>
-<script src="./js/onboarding.js?v=20250207v1"></script>
+<script src="./js/onboarding.js?v=20260821"></script>
 
 <script>
 const U={id:()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8),money:v=>(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),moneyC:(v,c)=>{try{return (v||0).toLocaleString('pt-BR',{style:'currency',currency:c})}catch{return U.money(v)}},date:d=>{try{return new Date(d).toLocaleDateString('pt-BR')}catch{return''}},dI:d=>{try{return new Date(d).toISOString().split('T')[0]}catch{return new Date().toISOString().split('T')[0]}},pct:(v,t)=>t===0?0:Math.min(((v/t)*100),100),qs:s=>document.querySelector(s),qsa:s=>document.querySelectorAll(s),on:(el,ev,fn)=>el&&el.addEventListener(ev,fn),sameDay:(a,b)=>{try{return new Date(a).toDateString()===new Date(b).toDateString()}catch{return false}},trunc:(s,n=30)=>s&&s.length>n?s.slice(0,n)+'…':s||'',getInitials:n=>n?n.trim().split(' ').filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2):'?'};
