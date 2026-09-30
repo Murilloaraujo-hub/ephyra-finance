@@ -53,7 +53,8 @@
 <div class="form-group"><label class="form-label">Senha *</label><div class="input-wrap"><input type="password" id="r-pw" autocomplete="new-password" maxlength="256" class="form-input" placeholder="Mínimo 8 caracteres" required><button type="button" class="toggle-pw" data-on-click="h10" aria-label="Mostrar senha"><i class="fas fa-eye"></i></button></div><div class="form-error" id="r-pw-err"></div></div>
 <div class="form-group"><label class="form-label">Confirmar senha *</label><div class="input-wrap"><input type="password" id="r-pw2" autocomplete="new-password" maxlength="256" class="form-input" placeholder="Repita a senha" required><button type="button" class="toggle-pw" data-on-click="h11" aria-label="Mostrar senha"><i class="fas fa-eye"></i></button></div><div class="form-error" id="r-pw2-err"></div></div>
 <div class="form-group"><label class="form-label" for="r-salario">Salário mensal em BRL *</label><input type="number" id="r-salario" class="form-input" step="0.01" min="0.01" inputmode="decimal" placeholder="0,00" required aria-describedby="r-salario-err"><div class="form-error" id="r-salario-err"></div></div>
-<button type="submit" class="btn btn-primary btn-lg btn-bk"><i class="fas fa-rocket"></i> Criar Conta</button>
+<div class="form-error" id="register-err" role="alert" aria-live="polite"></div>
+<button type="submit" class="btn btn-primary btn-lg btn-bk" aria-describedby="register-err"><i class="fas fa-rocket"></i> Criar Conta</button>
 </form>
 <div class="auth-switch">Já tem conta? <button type="button" data-on-click="h1">Entrar</button></div>
 </div>
@@ -134,11 +135,11 @@
 <script src="./js/assistant.js?v=20260929-2"></script>
 
 <script src="./js/vendor/supabase.min.js"></script>
-<script src="./js/auth-config.js?v=20260929-3"></script>
-<script src="./js/auth-service.js?v=20260929-3"></script>
+<script src="./js/auth-config.js?v=20260930-1"></script>
+<script src="./js/auth-service.js?v=20260930-1"></script>
 <script src="./js/contact-config.js?v=20260929-4"></script>
 <script src="./js/recommendations.js?v=20260929-4"></script>
-<script src="./js/app.js?v=20260929-4"></script>
+<script src="./js/app.js?v=20260930-1"></script>
 <script src="./js/events.js?v=20260929-4"></script>
 </body>
 </html>
