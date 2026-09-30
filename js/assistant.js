@@ -1,0 +1,302 @@
+(function(global){
+'use strict';
+
+const EphyraAssistant={
+initialized:false,
+isOpen:false,
+typingTimer:0,
+lastFocus:null,
+maxHistory:40,
+
+init(){
+if(this.initialized){this.renderHistory();return}
+const form=document.getElementById('assistant-form');
+if(!form)return;
+this.initialized=true;
+form.addEventListener('submit',event=>{event.preventDefault();this.send()});
+document.getElementById('assistant-input')?.addEventListener('keydown',event=>{
+if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();form.requestSubmit()}
+});
+document.addEventListener('keydown',event=>{
+if(!this.isOpen)return;
+if(event.key==='Escape'){event.preventDefault();this.close();return}
+if(event.key==='Tab')this.trapFocus(event);
+});
+this.renderHistory();
+},
+
+data(){return global.App?.data||{}},
+num(value){const number=Number(value);return Number.isFinite(number)?number:0},
+normalize(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9$%.,\s]/g,' ').replace(/\s+/g,' ').trim()},
+transactions(){return Array.isArray(this.data().historico)?this.data().historico.filter(item=>item&&item.id):[]},
+categories(){return Array.isArray(this.data().categorias)?this.data().categorias:[]},
+
+monthBounds(offset=0){
+const now=new Date(),start=new Date(now.getFullYear(),now.getMonth()+offset,1),end=new Date(now.getFullYear(),now.getMonth()+offset+1,1);
+return{start,end};
+},
+
+periodFor(question){
+const text=this.normalize(question),now=new Date();
+if(/\bhoje\b/.test(text)){const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()),end=new Date(start);end.setDate(end.getDate()+1);return{start,end,label:'hoje'}}
+if(/mes passado|ultimo mes|mês passado/.test(text)){return{...this.monthBounds(-1),label:'no mês passado'}}
+if(/este mes|nesse mes|mes atual|mês atual/.test(text)){return{...this.monthBounds(0),label:'neste mês'}}
+const days=text.match(/ultimos?\s+(7|15|30|60|90)\s+dias?/);
+if(days){const amount=Number(days[1]),start=new Date(now);start.setHours(0,0,0,0);start.setDate(start.getDate()-amount+1);return{start,end:new Date(now.getTime()+1),label:`nos últimos ${amount} dias`}}
+return{start:null,end:null,label:'em todo o período'};
+},
+
+// Resolve short follow-ups against the last question without sending history elsewhere.
+contextualQuestion(question){
+const current=this.normalize(question);
+if(!current||current.length>90)return question;
+const previous=this.history().slice().reverse().find(item=>item.role==='user');
+if(!previous)return question;
+const prior=this.normalize(previous.text);
+const short=current.replace(/^(e|mas|entao)\s+/,'').replace(/^no\s+(?=mes\b)/,'');
+const period=/^(hoje|este mes|nesse mes|mes atual|mes passado|ultimo mes|ultimos?\s+(7|15|30|60|90)\s+dias?)\??$/.test(short);
+if(period&&/(gastei|gasto|despesa|receita|recebi|ganhei|entrada|economizei|quanto sobrou|balanco|categoria|transa)/.test(prior)){
+return `${prior.replace(/\b(hoje|este mes|nesse mes|mes atual|mes passado|ultimo mes|ultimos?\s+(7|15|30|60|90)\s+dias?)\b/g,'').trim()} ${short}`;
+}
+const category=this.categoryFor(short);
+if(category&&/^(e\s+)?(quanto\s+)?(em\s+|na\s+|no\s+|de\s+)?[\p{L}\s]+\??$/u.test(current)&&/(gastei|gasto|despesa|recebi|receita|quanto)/.test(prior)){
+const type=/recebi|receita/.test(prior)?'recebi':'gastei';
+const oldCategory=this.categoryFor(prior);
+const base=oldCategory?prior.replace(this.normalize(oldCategory.nome),'').replace(this.normalize(oldCategory.id),''):prior;
+const range=this.periodFor(base),suffix=range.start?range.label:'';
+return `${type} quanto em ${category.nome} ${suffix}`;
+}
+return question;
+},
+
+inPeriod(items,period){
+if(!period.start)return items.slice();
+return items.filter(item=>{const date=new Date(item.data);return!Number.isNaN(date.getTime())&&date>=period.start&&date<period.end});
+},
+
+categoryFor(question){
+const text=this.normalize(question),aliases={
+alimentacao:['alimentacao','comida','mercado','restaurante','delivery'],
+transporte:['transporte','uber','onibus','gasolina','combustivel'],
+moradia:['moradia','aluguel','casa'],
+saude:['saude','farmacia','remedio'],
+educacao:['educacao','escola','curso','livro'],
+lazer:['lazer','jogo','cinema','passeio'],
+compras:['compras','shopping','roupa'],
+contas:['contas','energia','luz','agua','internet'],
+salario:['salario','pagamento'],
+freelance:['freelance','freela'],
+investimentos:['investimento','dividendo'],
+presente:['presente']
+};
+return this.categories().find(category=>{
+const terms=[this.normalize(category.nome),category.id,...(aliases[category.id]||[])];
+return terms.some(term=>term&&new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}s?\\b`).test(text));
+})||null;
+},
+
+extractAmount(question){
+const text=String(question||''),match=text.match(/(?:r\$\s*)?([0-9][0-9.,]*)/i);
+if(!match)return null;
+let raw=match[1];
+if(raw.includes(',')&&raw.includes('.'))raw=raw.replace(/\./g,'').replace(',','.');
+else if(raw.includes(','))raw=raw.replace(',','.');
+else if(/^\d{1,3}(?:\.\d{3})+$/.test(raw))raw=raw.replace(/\./g,'');
+const value=Number(raw);return Number.isFinite(value)?value:null;
+},
+
+sum(items){return items.reduce((total,item)=>total+this.num(item.valor),0)},
+money(value){return global.U?.money?global.U.money(value):this.num(value).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})},
+percent(value){return `${this.num(value).toFixed(1).replace('.',',')}%`},
+
+budget(){
+if(global.App?.budget503020)return global.App.budget503020();
+const income=this.sum(this.transactions().filter(item=>item.tipo==='receita')),expenses=this.transactions().filter(item=>item.tipo==='despesa'),needs=new Set(['alimentacao','transporte','moradia','saude','educacao','contas']),necessidades=this.sum(expenses.filter(item=>needs.has(item.categoria))),desejos=this.sum(expenses.filter(item=>!needs.has(item.categoria))),economia=income-necessidades-desejos;
+return{income,necessidades,desejos,economia,needsPct:income?necessidades/income*100:0,wantsPct:income?desejos/income*100:0,savingsPct:income?economia/income*100:0};
+},
+
+guidance(question){
+const text=this.normalize(question).replace(/\beconomisar\b/g,'economizar').replace(/\bgrana\b/g,'dinheiro');
+const request=/\b(como|ajud\w*|quero|preciso|dica\w*|orient\w*|aprend\w*|melhor\w*|planej\w*|organ\w*|comec\w*|reduz\w*|diminu\w*|cortar|evitar)\b/.test(text);
+const savings=/\b(economizar|poupar|juntar|guardar dinheiro|gastar menos|parar de gastar|cortar gastos|reduzir gastos)\b/.test(text);
+const organization=/\b(organ\w*|dividir|distribuir|administrar|gerenciar|controlar|planej\w*)\b/.test(text)&&/\b(ganhos?|renda|salario|dinheiro|financas|orcamento|gastos?|receitas?|contas)\b/.test(text);
+const trouble=/\b(no vermelho|endividad\w*|nao sobra dinheiro|dinheiro nao sobra|gasto mais do que ganho|gasto muito|gastando muito)\b/.test(text);
+const starting=/^(por onde (eu )?comeco|como (eu )?comeco|me de dicas|me da dicas|quero dicas|dicas de economia)$/.test(text);
+const simulation=/\b(posso|consigo|da para|daria para)\b/.test(text)&&/\b(guardar|economizar|depositar)\b/.test(text)&&this.extractAmount(question)!==null&&!/\b(como|ajud\w*)\b/.test(text);
+if(simulation||!(organization||trouble||starting||(savings&&(request||/^(economizar|poupar|juntar dinheiro|guardar dinheiro)$/.test(text)))))return null;
+let period=this.periodFor(question);
+if(!period.start)period={...this.monthBounds(0),label:'neste mês'};
+const records=this.inPeriod(this.transactions(),period),income=this.sum(records.filter(item=>item.tipo==='receita')),expenses=records.filter(item=>item.tipo==='despesa'),spent=this.sum(expenses),result=income-spent;
+const summary=records.length?`Pelos registros ${period.label}: receitas de ${this.money(income)} e despesas de ${this.money(spent)}. ${result>=0?`A diferença é de ${this.money(result)}.`:`As despesas superaram as receitas em ${this.money(-result)}.`} Essa diferença não é uma previsão de dinheiro livre: pode haver contas pendentes e valores destinados às metas.`:`Ainda não encontrei movimentações ${period.label}. Posso ajudar você a começar sem inventar valores.`;
+if(organization||starting){
+const reference=income>0?`\n\nComo referência flexível, sobre as receitas registradas ${period.label}:\n• 50% para necessidades: ${this.money(income*.5)}.\n• 30% para desejos: ${this.money(income*.3)}.\n• 20% para objetivos financeiros: ${this.money(income*.2)}.\nEsses valores são um exemplo de divisão, não limites obrigatórios nem uma promessa de que você poderá guardar essa quantia.`:'';
+return{text:`Vamos organizar seus ganhos em etapas:\n\n1. Registre o dinheiro que realmente entrou. Se sua renda varia, evite contar com valores que ainda não recebeu.\n2. Liste suas contas, os vencimentos e as despesas essenciais antes de definir quanto gastar com lazer.\n3. Separe os gastos por categoria e escolha limites que caibam na sua realidade.\n4. Defina uma meta de economia possível e revise os registros toda semana.\n\n${summary}${reference}`,suggestions:['Me ajude a economizar','Quanto gastei este mês?','Como estão minhas metas?'],action:{label:'Organizar transações',page:'transacoes'}};
+}
+const totals=new Map();expenses.forEach(item=>totals.set(item.categoria,(totals.get(item.categoria)||0)+this.num(item.valor)));
+const top=[...totals].sort((a,b)=>b[1]-a[1])[0];
+const category=top?this.categories().find(item=>item.id===top[0]):null;
+const review=top?`\n\nA maior categoria de despesas registrada ${period.label} é “${category?.nome||'Outros'}”, com ${this.money(top[1])}. Veja quais lançamentos podem ser ajustados; a categoria pode incluir despesas essenciais que não devem ser cortadas automaticamente.`:'';
+return{text:`${trouble?'Vamos começar entendendo o que está apertando seu orçamento.':'Vamos montar um começo simples para economizar.'}\n\n${summary}\n\n1. Confira primeiro o que ainda precisa pagar, principalmente as despesas essenciais.\n2. Revise gastos que você pode escolher reduzir, como assinaturas pouco usadas e compras por impulso.\n3. Escolha um ajuste concreto para esta semana e registre o resultado.\n4. Se houver espaço depois das contas, defina um valor possível para uma meta. Começar pequeno também conta.${review}\n\n${result<0?'Como as despesas registradas superaram as receitas do período, primeiro procure equilibrar essa diferença. Não vou sugerir um depósito automático.':'Qual categoria você quer revisar primeiro? Você pode perguntar “quanto gastei com alimentação este mês?”.'}`,suggestions:['Qual categoria teve mais gastos este mês?','Como organizar meus ganhos?','Como estão minhas metas?'],action:{label:'Revisar despesas',page:'transacoes',filter:{tipo:'despesa'}}};
+},
+
+capabilities(){
+return{text:'Sou a Ephyra, sua assistente financeira! Posso ajudar você a entender os dados registrados aqui. Veja alguns exemplos:\n\n• Dar passos para economizar: “Me ajude a economizar.”\n• Organizar seus ganhos: “Como organizar meu salário?”\n• Consultar seu saldo: “Quanto dinheiro tenho?”\n• Somar gastos e receitas: “Quanto gastei este mês?”\n• Analisar categorias: “Quanto gastei com alimentação?”\n• Encontrar sua maior despesa: “Qual foi minha maior compra?”\n• Comparar meses: “Compare este mês com o passado.”\n• Analisar a regra 50/30/20: “Como está minha regra 50/30/20?”\n• Acompanhar metas: “Quanto falta para minha meta?”\n• Simular uma reserva: “Posso guardar R$ 200?”\n• Mostrar movimentações: “Quais foram minhas últimas transações?”\n\nTambém respondo a cumprimentos e perguntas sobre meu funcionamento. Trabalho com os dados deste navegador; não consulto sua conta bancária nem altero seus registros pelo chat.',suggestions:this.defaultSuggestions()};
+},
+
+smallTalk(question){
+const text=this.normalize(question).replace(/\bvc\b/g,'voce').replace(/\bvcs\b/g,'voces').replace(/\bpq\b/g,'por que').replace(/[.,]+/g,' ').replace(/\s+/g,' ').trim();
+const message=text.replace(/^(oi+|ola|e ai|bom dia|boa tarde|boa noite)(\s+ephyra)?\s*/,'').trim();
+if(/\b(o que|oq|que) (voce |a ephyra )?(pode|consegue|sabe) fazer\b|\b(o que|oq) (voce |a ephyra )?faz\b|\b(quais|qual) (sao |e )?(as |a )?(suas |suas principais )?(funcoes|funcionalidades|habilidades|funcao)\b|\b(como|em que) (voce )?pode me ajudar\b/.test(text)||/^(ajuda|me ajuda|me ajude|pode me ajudar|voce pode me ajudar|comandos|perguntas|o que perguntar|o que posso perguntar|o que posso te perguntar)$/.test(message))return this.capabilities();
+if(/^(quem (e voce|voce e)|qual (e )?(o )?seu nome|voce (e|eh) (uma? )?(ia|robo|inteligencia artificial)|voce e real)$/.test(message))return{text:'Eu sou a Ephyra, a assistente financeira deste aplicativo. Reconheço perguntas sobre suas finanças e algumas conversas básicas usando regras locais. Posso explicar minhas funções e consultar os dados que você registrou.',suggestions:['O que você pode fazer?',...this.defaultSuggestions().slice(0,3)]};
+if(/^(como (voce )?funciona|de onde vem (os|seus) dados|voce (usa|precisa de) internet|meus dados (sao|ficam) privados)$/.test(message))return{text:'Leio os registros salvos no Ephyra Finance neste navegador e faço os cálculos para responder. As perguntas e os dados financeiros não são enviados a uma IA externa. Não acesso bancos nem vejo despesas que você não cadastrou.',suggestions:['O que você pode fazer?','Quanto gastei este mês?']};
+if(/^(oi+|ola|e ai|bom dia|boa tarde|boa noite)( ephyra)?$/.test(text)||/^(tudo bem|como (voce )?(esta|vai)|tudo certo)( com voce)?$/.test(message))return{text:`Olá, ${global.App?.user?.nome?.split(' ')[0]||'tudo bem'}! Estou pronta para ajudar você a entender suas finanças. Você pode me perguntar o que eu faço ou consultar seus gastos, saldo e metas.`,suggestions:['O que você pode fazer?',...this.defaultSuggestions().slice(0,3)]};
+if(/^(muito )?(obrigad[oa]|valeu|agradeco)( ephyra| pela ajuda)?$|^(legal|beleza|entendi|certo|ok|show|perfeito)$/.test(message))return{text:'Por nada! Quando quiser, podemos olhar seus gastos, saldo ou metas.',suggestions:this.defaultSuggestions()};
+if(/^(tchau|ate mais|ate logo|falou)( ephyra)?$/.test(message))return{text:'Até mais! Estarei por aqui quando você quiser organizar suas finanças.'};
+return null;
+},
+
+answer(question){
+const text=this.normalize(question),period=this.periodFor(question),all=this.inPeriod(this.transactions(),period),receitas=all.filter(item=>item.tipo==='receita'),despesas=all.filter(item=>item.tipo==='despesa'),category=this.categoryFor(question);
+if(!text)return{text:'Digite uma pergunta para eu analisar seus dados.'};
+const guidance=this.guidance(question);if(guidance)return guidance;
+const conversation=this.smallTalk(question);if(conversation)return conversation;
+
+if(/compar|diferenca|evolucao/.test(text)&&/mes|mensal/.test(text)){
+const current=this.inPeriod(this.transactions(),{...this.monthBounds(0),label:'neste mês'}),previous=this.inPeriod(this.transactions(),{...this.monthBounds(-1),label:'no mês passado'}),currentIncome=this.sum(current.filter(item=>item.tipo==='receita')),previousIncome=this.sum(previous.filter(item=>item.tipo==='receita')),currentExpense=this.sum(current.filter(item=>item.tipo==='despesa')),previousExpense=this.sum(previous.filter(item=>item.tipo==='despesa')),difference=currentExpense-previousExpense;
+return{text:`Comparação mensal:\n• Receitas: ${this.money(currentIncome)} neste mês e ${this.money(previousIncome)} no anterior.\n• Despesas: ${this.money(currentExpense)} neste mês e ${this.money(previousExpense)} no anterior.\n${difference===0?'As despesas ficaram no mesmo valor.':difference>0?`Você gastou ${this.money(difference)} a mais neste mês.`:`Você gastou ${this.money(Math.abs(difference))} a menos neste mês.`}`,action:{label:'Abrir resumo financeiro',page:'resumo'}};
+}
+
+if(/50\s*[/.-]\s*30\s*[/.-]\s*20|\b50\s+30\s+20\b|necessidades|desejos/.test(text)||(/economia/.test(text)&&/regra|renda|porcent/.test(text))){
+const value=this.budget();
+if(!value.income)return{text:'Ainda não há receitas suficientes para calcular a regra 50/30/20.',action:{label:'Adicionar receita',command:'receita'}};
+const needsState=value.needsPct<=50?'dentro da referência':'acima da referência',wantsState=value.wantsPct<=30?'dentro da referência':'acima da referência',savingState=value.savingsPct>=20?'atingiu a referência':'ainda não atingiu a referência';
+return{text:`Análise 50/30/20:\n• Necessidades: ${this.money(value.necessidades)} (${this.percent(value.needsPct)}), ${needsState} de 50%.\n• Desejos: ${this.money(value.desejos)} (${this.percent(value.wantsPct)}), ${wantsState} de 30%.\n• Economia: ${this.money(value.economia)} (${this.percent(value.savingsPct)}), ${savingState} de 20%.`,action:{label:'Ver análise no Dashboard',page:'dashboard'}};
+}
+
+if(/posso|consigo|da para|daria para/.test(text)&&/(guardar|economizar|depositar)/.test(text)){
+const amount=this.extractAmount(question);
+if(amount===null||amount<=0)return{text:'Informe um valor maior que zero. Exemplo: “Posso guardar R$ 200?”'};
+const balance=this.num(this.data().saldo),remaining=balance-amount;
+if(balance>=amount)return{text:`Sim. Guardando ${this.money(amount)}, seu saldo disponível ficaria em ${this.money(remaining)}. Confira suas despesas previstas antes de confirmar qualquer depósito.`,action:{label:'Abrir metas',page:'metas'}};
+return{text:`Seu saldo disponível é ${this.money(balance)}, então faltam ${this.money(amount-balance)} para guardar ${this.money(amount)} sem deixar o saldo negativo.`,action:{label:'Ver transações',page:'transacoes'}};
+}
+
+if(/meta|objetivo/.test(text)){
+const goals=Array.isArray(this.data().metas)?this.data().metas:[];
+if(!goals.length)return{text:'Você ainda não criou metas financeiras.',action:{label:'Criar uma meta',page:'metas'}};
+if(/falta|restante|terminar|concluir/.test(text)){const named=goals.find(goal=>text.includes(this.normalize(goal.nome))),goal=named||goals.find(item=>item.status!=='concluida')||goals[0],remaining=Math.max(0,this.num(goal.valorObjetivo)-this.num(goal.valorGuardado));return{text:remaining>0?`Faltam ${this.money(remaining)} para concluir a meta “${goal.nome}”. Você já guardou ${this.money(goal.valorGuardado)} de ${this.money(goal.valorObjetivo)}.`:`A meta “${goal.nome}” já foi concluída.`,action:{label:'Abrir metas',page:'metas'}}}
+const open=goals.filter(goal=>goal.status!=='concluida'),completed=goals.length-open.length,lines=goals.slice(0,4).map(goal=>{const saved=this.num(goal.valorGuardado),target=this.num(goal.valorObjetivo),pct=target>0?Math.min(100,saved/target*100):0;return`• ${goal.nome}: ${this.money(saved)} de ${this.money(target)} (${this.percent(pct)})`});
+return{text:`Você tem ${goals.length} ${goals.length===1?'meta':'metas'}: ${completed} concluída${completed===1?'':'s'} e ${open.length} em andamento.\n${lines.join('\n')}`,action:{label:'Abrir metas',page:'metas'}};
+}
+
+if(/categoria/.test(text)&&/(mais|maior|principal)/.test(text)&&/(gast|despesa|consumo)/.test(text)){
+const totals=new Map();despesas.forEach(item=>totals.set(item.categoria,(totals.get(item.categoria)||0)+this.num(item.valor)));const top=[...totals.entries()].sort((a,b)=>b[1]-a[1])[0];if(!top)return{text:`Não encontrei despesas ${period.label}.`};const cat=this.categories().find(item=>item.id===top[0]),total=this.sum(despesas),share=total>0?top[1]/total*100:0;return{text:`A categoria com maior gasto ${period.label} é ${cat?.nome||'Outros'}, com ${this.money(top[1])}, equivalente a ${this.percent(share)} das despesas do período.`,action:{label:'Ver essa categoria',page:'transacoes',filter:{tipo:'despesa',categoria:top[0]}}};
+}
+
+if(/maior|mais alta|mais caro/.test(text)&&/(despesa|gasto|compra)/.test(text)){
+const largest=despesas.slice().sort((a,b)=>this.num(b.valor)-this.num(a.valor))[0];
+if(!largest)return{text:`Não encontrei despesas ${period.label}.`};
+const cat=this.categories().find(item=>item.id===largest.categoria);
+return{text:`Sua maior despesa ${period.label} foi “${largest.nome}”, no valor de ${this.money(largest.valor)}${cat?` em ${cat.nome}`:''}, registrada em ${global.U?.date?global.U.date(largest.data):''}.`,action:{label:'Ver transações',page:'transacoes'}};
+}
+
+if(/recent|ultimas moviment|ultimas transa/.test(text)){
+const recent=this.transactions().slice().sort((a,b)=>new Date(b.data)-new Date(a.data)).slice(0,5);
+if(!recent.length)return{text:'Você ainda não registrou movimentações.'};
+return{text:`Movimentações mais recentes:\n${recent.map(item=>`• ${item.tipo==='receita'?'+':'−'} ${this.money(item.valor)} — ${item.nome}`).join('\n')}`,action:{label:'Ver todas',page:'transacoes'}};
+}
+
+if(/quantas? transa|total de transa/.test(text))return{text:`Você registrou ${all.length} ${all.length===1?'transação':'transações'} ${period.label}: ${receitas.length} ${receitas.length===1?'receita':'receitas'} e ${despesas.length} ${despesas.length===1?'despesa':'despesas'}.`,action:{label:'Abrir transações',page:'transacoes'}};
+
+if(/economizei|quanto sobrou|resultado|balanco/.test(text)){const result=this.sum(receitas)-this.sum(despesas);return{text:result>=0?`O resultado ${period.label} é positivo em ${this.money(result)}: ${this.money(this.sum(receitas))} de receitas menos ${this.money(this.sum(despesas))} de despesas.`:`O resultado ${period.label} é negativo em ${this.money(Math.abs(result))}: as despesas superaram as receitas.`,action:{label:'Ver resumo financeiro',page:'resumo'}}}
+
+if(category&&/(gastei|gasto|despesa|recebi|receita|quanto|total)/.test(text)){
+const type=category.tipo||(/recebi|receita/.test(text)?'receita':'despesa'),matches=all.filter(item=>item.tipo===type&&item.categoria===category.id),total=this.sum(matches);
+return{text:`${type==='receita'?'Você recebeu':'Você gastou'} ${this.money(total)} em ${category.nome} ${period.label}, em ${matches.length} ${matches.length===1?'movimentação':'movimentações'}.`,action:{label:'Filtrar transações',page:'transacoes',filter:{tipo:type,categoria:category.id}}};
+}
+
+if(/saldo|quanto tenho|dinheiro disponivel/.test(text))return{text:`Seu saldo disponível é ${this.money(this.data().saldo)}. Esse valor já considera o dinheiro reservado nas metas.`,action:{label:'Ver Dashboard',page:'dashboard'}};
+
+if(/receita|recebi|ganhei|entrada/.test(text))return{text:`Suas receitas somam ${this.money(this.sum(receitas))} ${period.label}, em ${receitas.length} ${receitas.length===1?'registro':'registros'}.`,action:{label:'Ver receitas',page:'transacoes',filter:{tipo:'receita'}}};
+
+if(/despesa|gastei|gasto|saida|compras?/.test(text))return{text:`Suas despesas somam ${this.money(this.sum(despesas))} ${period.label}, em ${despesas.length} ${despesas.length===1?'registro':'registros'}.`,action:{label:'Ver despesas',page:'transacoes',filter:{tipo:'despesa'}}};
+
+return{text:'Ainda não entendi o que você precisa. Você quer organizar seus ganhos, encontrar formas de economizar ou consultar um valor? Experimente “me ajude a economizar” ou “quanto gastei este mês?”.',suggestions:this.defaultSuggestions()};
+},
+
+defaultSuggestions(){return['Me ajude a economizar','Como organizar meus ganhos?','Quanto gastei este mês?','Como estão minhas metas?']},
+
+history(){
+const history=this.data().assistantHistory;
+return Array.isArray(history)?history.filter(item=>item&&['user','assistant'].includes(item.role)&&typeof item.text==='string').slice(-this.maxHistory):[];
+},
+
+persist(messages){
+const data=this.data();if(!global.App?.user||!data)return;
+data.assistantHistory=messages.slice(-this.maxHistory).map(item=>({role:item.role,text:String(item.text).slice(0,2000),time:item.time||new Date().toISOString(),action:item.action||null}));
+global.App.saveData();
+},
+
+createMessage(item){
+const wrapper=document.createElement('div');wrapper.className=`assistant-message ${item.role}`;
+const avatar=document.createElement('span');avatar.className='assistant-message-avatar';avatar.setAttribute('aria-hidden','true');avatar.textContent=item.role==='assistant'?'E':'V';
+const content=document.createElement('div');content.className='assistant-message-content';
+const bubble=document.createElement('div');bubble.className='assistant-bubble';bubble.textContent=item.text;content.appendChild(bubble);
+if(item.action){const action=document.createElement('button');action.type='button';action.className='assistant-action';action.textContent=item.action.label;action.addEventListener('click',()=>this.runAction(item.action));content.appendChild(action)}
+wrapper.append(avatar,content);return wrapper;
+},
+
+renderHistory(){
+const list=document.getElementById('assistant-messages');if(!list)return;
+list.innerHTML=EphyraSecurity.html('');const history=this.history();
+if(!history.length){list.appendChild(this.createMessage({role:'assistant',text:'Olá! Eu sou a Ephyra, sua assistente financeira. Posso ajudar você a entender seus gastos, saldo e metas. Experimente perguntar: “O que você pode fazer?”'}))}
+else history.forEach(item=>list.appendChild(this.createMessage(item)));
+this.renderSuggestions(history.length?undefined:['O que você pode fazer?',...this.defaultSuggestions().slice(0,3)]);this.scrollEnd();
+},
+
+renderSuggestions(items){
+const container=document.getElementById('assistant-suggestions');if(!container)return;
+container.innerHTML=EphyraSecurity.html('');(items||this.defaultSuggestions()).slice(0,4).forEach(text=>{const button=document.createElement('button');button.type='button';button.className='assistant-suggestion';button.textContent=text;button.addEventListener('click',()=>{const input=document.getElementById('assistant-input');if(input){input.value=text;this.send()}});container.appendChild(button)});
+},
+
+send(){
+const input=document.getElementById('assistant-input'),button=document.getElementById('assistant-send'),value=input?.value.trim();if(!value)return;
+const resolved=this.contextualQuestion(value),history=this.history(),userMessage={role:'user',text:value,time:new Date().toISOString()};history.push(userMessage);this.persist(history);document.getElementById('assistant-messages')?.appendChild(this.createMessage(userMessage));input.value='';input.disabled=true;if(button)button.disabled=true;this.showTyping();this.scrollEnd();
+clearTimeout(this.typingTimer);this.typingTimer=setTimeout(()=>{const response=this.answer(resolved),assistantMessage={role:'assistant',text:response.text,time:new Date().toISOString(),action:response.action||null};this.hideTyping();const updated=this.history();updated.push(assistantMessage);this.persist(updated);document.getElementById('assistant-messages')?.appendChild(this.createMessage(assistantMessage));this.renderSuggestions(response.suggestions);input.disabled=false;if(button)button.disabled=false;if(this.isOpen)input.focus();this.scrollEnd()},window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:420);
+},
+
+showTyping(){document.getElementById('assistant-typing')?.classList.add('show')},
+hideTyping(){document.getElementById('assistant-typing')?.classList.remove('show')},
+scrollEnd(){requestAnimationFrame(()=>{const list=document.getElementById('assistant-messages');if(list)list.scrollTop=list.scrollHeight})},
+
+runAction(action){
+this.close();
+if(action.page){global.App?.nav(action.page);if(action.page==='transacoes'&&action.filter)setTimeout(()=>{const type=document.getElementById('txft'),category=document.getElementById('txfc');if(type&&['todos','receita','despesa'].includes(action.filter.tipo))type.value=action.filter.tipo;global.App?.updateTxCategoryFilter();if(category&&[...category.options].some(option=>option.value===action.filter.categoria))category.value=action.filter.categoria||'';global.App?.fTx()},0)}
+else if(action.command==='receita')global.App?.showTxModal('receita');
+},
+
+open(){
+if(!global.App?.data)return;
+this.init();const source=document.activeElement;this.lastFocus=source?.id==='assistant-menu-button'&&window.innerWidth<=1024?document.getElementById('assistant-launcher'):source;global.App?.tsb(false);this.isOpen=true;const backdrop=document.getElementById('assistant-backdrop'),panel=document.getElementById('assistant-panel');backdrop?.classList.add('open');backdrop?.setAttribute('aria-hidden','false');document.getElementById('assistant-launcher')?.setAttribute('aria-expanded','true');document.getElementById('assistant-menu-button')?.setAttribute('aria-expanded','true');document.getElementById('assistant-menu-button')?.classList.add('a');document.body.classList.add('ui-locked');this.renderHistory();requestAnimationFrame(()=>panel?.querySelector('#assistant-input')?.focus());
+},
+
+close(){
+if(!this.isOpen)return;this.isOpen=false;const backdrop=document.getElementById('assistant-backdrop');backdrop?.classList.remove('open');backdrop?.setAttribute('aria-hidden','true');document.getElementById('assistant-launcher')?.setAttribute('aria-expanded','false');document.getElementById('assistant-menu-button')?.setAttribute('aria-expanded','false');document.getElementById('assistant-menu-button')?.classList.remove('a');if(!document.querySelector('.mo.a')&&!document.getElementById('sidebar')?.classList.contains('o'))document.body.classList.remove('ui-locked');this.lastFocus?.focus?.();
+},
+
+backdrop(event){if(event.target===event.currentTarget)this.close()},
+
+clearHistory(){
+if(!global.confirm('Apagar o histórico de conversa deste dispositivo?'))return;
+this.data().assistantHistory=[];global.App?.saveData();this.renderHistory();
+},
+
+trapFocus(event){
+const panel=document.getElementById('assistant-panel'),items=[...(panel?.querySelectorAll('button:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')||[])].filter(item=>item.offsetParent!==null);if(!items.length)return;const first=items[0],last=items[items.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+},
+
+destroy(){clearTimeout(this.typingTimer);this.hideTyping();const input=document.getElementById('assistant-input'),send=document.getElementById('assistant-send');if(input)input.disabled=false;if(send)send.disabled=false;this.close()}
+};
+
+global.EphyraAssistant=EphyraAssistant;
+})(window);
