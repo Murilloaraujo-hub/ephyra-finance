@@ -208,7 +208,7 @@ const EphyraStorage = (() => {
     await saveUserData(targetEmail,imported);
     return {...obj,user:obj.user?{...obj.user,senha:undefined,senhaHash:undefined}:undefined};
   }
-  async function wipeEverything(){await init();await EphyraDB.clearAll();_usersCache={};_sessionCache=null;_dataCache.clear();sessionStorage.removeItem(TEMP_SESSION);try{const ks=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('ephyra_')) ks.push(k);}ks.forEach(k=>localStorage.removeItem(k));}catch{}}
+  async function wipeEverything(){await init();await EphyraDB.clearAll();_usersCache={};_sessionCache=null;_dataCache.clear();_deleted.clear();sessionStorage.removeItem(TEMP_SESSION);try{const ks=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('ephyra_')) ks.push(k);}ks.forEach(k=>localStorage.removeItem(k));}catch{}await EphyraDB.metaSet('remote_auth_v1',true);await EphyraDB.metaSet('migrated_from_localstorage_v1',true);}
   return{init,resetLegacyAccounts,removeAccount,getUsers,saveUsers,getUser,upsertUser,getSession,saveSession,touchSession,clearSession,getUserData,saveUserData,removeUserData,exportAll,importAll,wipeEverything,migrate};
 })();
 if(typeof window!=='undefined') window.EphyraStorage=EphyraStorage;
