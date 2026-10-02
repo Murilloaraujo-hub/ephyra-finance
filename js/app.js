@@ -84,7 +84,15 @@ const result=await EphyraAuth.register(email,pw,nome);
 if(result.session){await this.acceptUser(result.user,{foto,salario});Toast.s('Conta criada!');}
 else {if(result.user?.id&&result.user.identities?.length)await EphyraStorage.upsertUser({id:result.user.id,email,nome,foto,salario});this.switchTab('login');U.qs('#l-email').value=email;U.qs('#registration-status').textContent='Pedido de cadastro recebido. Confira seu e-mail e a pasta de spam para confirmar a conta antes de entrar.';}
 U.qs('#register-form').reset();this.removeAvatar('reg');
-}catch(err){this.showErr('register-err',this.errorMessage(err));U.qs('#register-err')?.scrollIntoView?.({block:'nearest',behavior:'smooth'});}
+}catch(err){
+const msg=this.errorMessage(err);
+if(err?.code==='user_already_registered'){
+this.showErr('register-err','Este e-mail já está cadastrado. Tente entrar ou use "Esqueci minha senha".');
+}else{
+this.showErr('register-err',msg);
+}
+U.qs('#register-err')?.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+}
 finally{this._registerBusy=false;button.disabled=false;button.innerHTML=label;button.removeAttribute('aria-busy');}
 
 },
@@ -133,6 +141,15 @@ if(err?.code==='email_address_invalid')return 'Informe um endereço de e-mail v�
 if(err?.code==='signup_disabled')return 'O cadastro está temporariamente desativado.';
 if((err?.status>=500||err?.code==='unexpected_failure')&&/email|smtp/i.test(err?.message||''))return 'Não foi possível enviar o e-mail de confirmação. Verifique a configuração SMTP do projeto.';
 if(err?.code==='weak_password')return 'Escolha uma senha mais forte, com pelo menos 8 caracteres.';
+if(err?.code==='user_already_registered')return 'Este e-mail já está cadastrado. Tente entrar ou recupere sua senha.';
+if(err?.code==='same_password')return 'A nova senha deve ser diferente da atual.';
+if(err?.code==='reauthentication_needed')return 'Entre novamente antes de realizar esta ação.';
+if(err?.code==='user_not_found')return 'Não existe conta com este e-mail.';
+if(err?.code==='request_timeout'&&err?.status===408)return err?.msg||'O servidor demorou para responder. Tente novamente.';
+if(err?.status===401)return 'Sessão expirada. Entre novamente.';
+if(err?.status===403)return 'Acesso não autorizado.';
+if(err?.status===502)return 'O serviço de autenticação está indisponível no momento.';
+if(err?.status===503)return 'Serviço temporariamente indisponível. Tente novamente em alguns minutos.';
 if(!EphyraAuth.configured())return 'O acesso por e-mail ainda não foi ativado neste site.';
 return 'Não foi possível concluir. Verifique os dados e sua conexão e tente novamente.';
 },
@@ -158,20 +175,35 @@ this.enterApp(user,data);
 async handleLogin(e){
 e.preventDefault();this.clearErrors();if(this._loginBusy)return;
 const email=U.qs('#l-email').value.trim().toLowerCase(),pw=U.qs('#l-pw').value;
+if(!this.validEmail(email))return this.showErr('l-email-err','Informe um e-mail válido.');
+const wait=EphyraSecurity.loginWait(email);if(wait>0){this.showErr('l-pw-err',`Muitas tentativas. Aguarde ${Math.ceil(wait/1000)} segundos.`);return;}
 this._loginBusy=true;const button=e.target.querySelector('[type=submit]');button.disabled=true;
 try{
-const user=await EphyraAuth.login(email,pw);
+if(!await EphyraAuth.init())throw new Error('auth_not_configured');
+const result=await EphyraAuth.login(email,pw);
+if(result.emailNotConfirmed){
+EphyraSecurity.loginFailed(email);
+this.showErr('l-pw-err','Confirme seu e-mail antes de entrar.');
+const resendBtn=document.createElement('button');resendBtn.type='button';resendBtn.className='btn btn-outline btn-sm';resendBtn.style.marginTop='.5rem';resendBtn.textContent='Reenviar e-mail de confirmação';
+resendBtn.addEventListener('click',async()=>{resendBtn.disabled=true;resendBtn.textContent='Enviando…';try{await EphyraAuth.resendConfirmation(email);Toast.s('E-mail de confirmação reenviado. Confira sua caixa de entrada e o spam.');resendBtn.textContent='E-mail reenviado!';}catch(err){Toast.e(this.errorMessage(err));resendBtn.disabled=false;resendBtn.textContent='Reenviar e-mail de confirmação';}});
+const errEl=U.qs('#l-pw-err');if(errEl&&errEl.parentNode){errEl.parentNode.insertBefore(resendBtn,errEl.nextSibling);}
+return;
+}
+EphyraSecurity.loginSucceeded(email);
 if(U.qs('#l-remember').checked)localStorage.setItem('ephyra_remembered_email',email);else localStorage.removeItem('ephyra_remembered_email');
-await this.acceptUser(user);U.qs('#l-pw').value='';Toast.s('Bem-vindo de volta!');
-}catch(err){this.showErr('l-pw-err',this.errorMessage(err));}
+await this.acceptUser(result.user);U.qs('#l-pw').value='';Toast.s('Bem-vindo de volta!');
+}catch(err){EphyraSecurity.loginFailed(email);this.showErr('l-pw-err',this.errorMessage(err));}
 finally{this._loginBusy=false;button.disabled=false;}
 },
 async handleRecover(e){
 e.preventDefault();this.clearErrors();if(this._recoverBusy)return;
 const email=U.qs('#f-email').value.trim().toLowerCase();if(!this.validEmail(email))return this.showErr('f-email-err','Informe um e-mail válido.');
 this._recoverBusy=true;const button=e.target.querySelector('[type=submit]');button.disabled=true;
-try{await EphyraAuth.recover(email);U.qs('#recovery-status').textContent='Se houver uma conta com esse e-mail, você receberá um link para redefinir a senha. Confira também o spam.';}
-catch(err){this.showErr('f-email-err',this.errorMessage(err));}
+try{if(!await EphyraAuth.init())throw new Error('auth_not_configured');await EphyraAuth.recover(email);U.qs('#recovery-status').textContent='Se houver uma conta com esse e-mail, você receberá um link para redefinir a senha em até alguns minutos. Confira também a pasta de spam.';}
+catch(err){
+if(err?.status===429||err?.code==='over_email_send_rate_limit'){this.showErr('f-email-err','Muitas solicitações. Aguarde alguns minutos antes de tentar novamente.');}
+else{this.showErr('f-email-err',this.errorMessage(err));}
+}
 finally{this._recoverBusy=false;button.disabled=false;}
 },
 async handleReset(e){
@@ -180,8 +212,15 @@ const pw=U.qs('#new-pw').value,pw2=U.qs('#new-pw2').value;
 if(pw.length<8||pw.length>256)return this.showErr('new-pw-err','Use entre 8 e 256 caracteres.');
 if(pw!==pw2)return this.showErr('new-pw-err','As senhas não coincidem.');
 this._resetBusy=true;const button=e.target.querySelector('[type=submit]');button.disabled=true;
-try{await EphyraAuth.reset(pw);e.target.reset();this.switchTab('login');Toast.s('Senha redefinida. Entre com sua nova senha.');}
-catch(err){this.showErr('new-pw-err',this.errorMessage(err));}
+try{if(!await EphyraAuth.init())throw new Error('auth_not_configured');await EphyraAuth.reset(pw);e.target.reset();this.switchTab('login');Toast.s('Senha redefinida. Entre com sua nova senha.');}
+catch(err){
+if(err?.status===401||err?.code==='reauthentication_needed'||/sessão|expired|token/i.test(err?.message||'')){
+this.showErr('new-pw-err','Sua sessão de recuperação expirou. Solicite um novo link de recuperação.');
+const linkBtn=document.createElement('button');linkBtn.type='button';linkBtn.className='btn btn-outline btn-sm';linkBtn.style.marginTop='.5rem';linkBtn.textContent='Solicitar novo link';
+linkBtn.addEventListener('click',()=>{this.cancelRecovery();this.switchTab('recover');});
+const errEl=U.qs('#new-pw-err');if(errEl&&errEl.parentNode)errEl.parentNode.insertBefore(linkBtn,errEl.nextSibling);
+}else{this.showErr('new-pw-err',this.errorMessage(err));}
+}
 finally{this._resetBusy=false;button.disabled=false;}
 },
 async cancelRecovery(){await EphyraAuth.logout();U.qs('#reset-form').reset();this.switchTab('login')},
@@ -190,14 +229,30 @@ checkDailyLogin(data){if(!data.config)data.config={diasUsando:1,ultimoLogin:new 
 enterApp(user,data){U.qs('#auth-screen').classList.add('hidden');U.qs('#app').classList.add('show');App.user=user;App.data=data;App.processLogin();App.setupNav();App.appTheme();App.updProf();App.nav('dashboard');if(typeof Sidebar!=='undefined')Sidebar.init();if(typeof EphyraAssistant!=='undefined')EphyraAssistant.init();if(typeof Market!=='undefined')Market.init(data).catch(()=>Toast.w('Mercado iniciado com dados simulados'));if(typeof MonthlySummary!=='undefined')MonthlySummary.init(data,user).catch(()=>Toast.w('Resumo mensal indisponível'));if(typeof EphyraOnboarding!=='undefined')EphyraOnboarding.init(data,user).catch(()=>{})},
 async logout(){if(this._loggingOut)return;this._loggingOut=true;if(typeof Market!=='undefined')Market.destroy();if(typeof MonthlySummary!=='undefined')MonthlySummary.destroy();if(typeof EphyraOnboarding!=='undefined')EphyraOnboarding.hide();if(typeof EphyraAssistant!=='undefined')EphyraAssistant.destroy();App.closeSecret();App.destroyCharts();App.cMo();App.tsb(false);document.body.classList.remove('ui-locked');await this.clearSession();App.data=null;App.user=null;U.qs('#app').classList.remove('show');U.qs('#auth-screen').classList.remove('hidden');U.qs('#login-form')?.reset();U.qs('#register-form')?.reset();this.switchTab('login');this._loggingOut=false;Toast.i('Você saiu da sua conta');},
 async autoLogin(){
+try{
 if(!await EphyraAuth.init())return false;
+}catch(err){
+console.error('[autoLogin] init failed',err);
+return false;
+}
+try{
 const user=await EphyraAuth.user();
 if(EphyraAuth.isRecovery()){
-if(!user){await EphyraAuth.logout();Toast.e('Solicite um novo link de recuperação.');return false;}
-this.switchTab('reset');return false;
+if(!user){
+await EphyraAuth.logout().catch(()=>{});
+Toast.e('O link de recuperação expirou ou é inválido. Solicite um novo.');
+return false;
+}
+this.switchTab('reset');
+return false;
 }
 if(!user)return false;
 await this.acceptUser(user,{},true);return true;
+}catch(err){
+console.error('[autoLogin]',err);
+try{await EphyraAuth.logout();}catch{}
+return false;
+}
 },
 async updateUser(updated){if(!App.user)return;const {nome,foto,salario}=updated;App.user={...App.user,...(nome!==undefined?{nome}:{}),...(foto!==undefined?{foto}:{}),...(salario!==undefined?{salario}:{})};await EphyraStorage.upsertUser(App.user)}
 
