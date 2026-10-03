@@ -1,3 +1,0 @@
-[functions.delete-account]
-# The function validates the caller with Supabase Auth /user before any deletion.
-verify_jwt = false
