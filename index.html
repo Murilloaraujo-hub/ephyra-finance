@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Ephyra Finance</title>
+<meta name="description" content="Ephyra Finance — controle financeiro pessoal 100% local: transações, metas, gráficos e backup em JSON/CSV, sem contas, APIs ou nuvem.">
+<meta name="theme-color" content="#10171f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%230f766e%22%2F%3E%3Cpath%20d%3D%22M41%2018H27v10h12v7H27v11h14v7H19V11h22z%22%20fill%3D%22%23fff%22%2F%3E%3C%2Fsvg%3E">
+
+<link rel="stylesheet" href="css/vendor/fontawesome.min.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dark">
+<a class="skip-link" href="#main-content">Pular para o conteúdo principal</a>
+<div id="ldr"><div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#0f766e,#155e75);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff">💰</div><div class="ld"></div><p class="tm2 txs">Carregando Ephyra Finance...</p></div>
+<div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="auth-screen" class="hidden">
+  <div class="auth-container" style="max-width:480px">
+    <div class="auth-brand">
+      <div class="logo" aria-hidden="true">E</div>
+      <h1>Ephyra Finance</h1>
+      <p class="auth-slogan">
+        <strong>Suas finanças, de forma simples e inteligente</strong>
+        <span>Transações, metas, mercado e acompanhamento financeiro — tudo neste dispositivo.</span>
+      </p>
+    </div>
+
+    <p class="auth-local-badge"><i class="fas fa-mobile-screen" aria-hidden="true"></i> Aplicativo local — seus dados ficam neste navegador</p>
+
+    <p id="auth-subtitle">Como você quer ser chamado?</p>
+
+    <form id="entrada-form" data-on-submit="h1">
+      <div class="form-group">
+        <label class="form-label" for="e-nome">Nome do perfil</label>
+        <input type="text" id="e-nome" class="form-input" maxlength="80" autocomplete="nickname" placeholder="Ex.: Murillo" aria-describedby="e-nome-err" required>
+        <p class="form-error" id="e-nome-err" role="alert"></p>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="e-salario">Salário mensal (opcional)</label>
+        <input type="text" id="e-salario" class="form-input" inputmode="decimal" maxlength="20" placeholder="Ex.: 3500,00" aria-describedby="e-salario-err">
+        <p class="form-error" id="e-salario-err" role="alert"></p>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg btn-bk" id="e-start">
+        <i class="fas fa-arrow-right-to-bracket" aria-hidden="true"></i> Começar
+      </button>
+    </form>
+
+    <div class="auth-backup">
+      <button type="button" class="btn btn-ghost btn-bk" data-on-click="h2">
+        <i class="fas fa-file-arrow-up" aria-hidden="true"></i> Restaurar um backup (.json)
+      </button>
+      <input type="file" id="e-import-file" accept="application/json,.json" hidden data-on-change="h3">
+    </div>
+
+    <p class="auth-note">
+      <i class="fas fa-shield-halved" aria-hidden="true"></i>
+      Não há conta na nuvem, senha nem sincronização entre aparelhos. Os dados são gravados no
+      armazenamento deste navegador — exporte um backup em <strong>Configurações</strong> para não perdê-los.
+    </p>
+  </div>
+</div>
+
+<div id="app" style="display:none" class="app">
+<button class="sov" type="button" data-on-click="h12" aria-label="Fechar menu" tabindex="-1"></button>
+<aside class="sidebar" id="sidebar" aria-label="Navegação principal" aria-expanded="false">
+<div class="sb-brand"><div class="sb-icon" aria-hidden="true"><i class="fas fa-dollar-sign"></i></div><h1 class="sb-title">Ephyra Finance</h1></div>
+<button class="sb-money-trigger" id="sb-money-trigger" aria-label="Expandir menu" tabindex="0">
+<span class="money-icon"><i class="fas fa-dollar-sign" aria-hidden="true"></i></span>
+<span class="money-text">Menu Financeiro</span>
+</button>
+<nav class="sb-nav" aria-label="Menu principal">
+<button class="ni a" type="button" data-nav="dashboard" data-on-click="h13" aria-label="Dashboard"><i class="fas fa-th-large"></i><span>Dashboard</span></button>
+<button class="ni" type="button" data-nav="transacoes" data-on-click="h14" aria-label="Transações"><i class="fas fa-exchange-alt"></i><span>Transações</span></button>
+<button class="ni" type="button" data-nav="metas" data-on-click="h15" aria-label="Metas"><i class="fas fa-bullseye"></i><span>Metas</span></button>
+<button class="ni" type="button" data-nav="mercado" data-on-click="h16" aria-label="Mercado"><i class="fas fa-globe"></i><span>Mercado</span></button>
+<button class="ni" type="button" data-nav="conquistas" data-on-click="h17" aria-label="Conquistas"><i class="fas fa-trophy"></i><span>Conquistas</span></button>
+<button class="ni" type="button" data-nav="perfil" data-on-click="h18" aria-label="Perfil"><i class="fas fa-user"></i><span>Perfil</span></button>
+<button class="ni" id="assistant-menu-button" type="button" data-on-click="h19" aria-label="Abrir assistente financeiro" aria-controls="assistant-panel" aria-expanded="false"><i class="fas fa-comments"></i><span>Assistente</span></button>
+</nav>
+<div class="sb-footer">
+<button class="sb-gear sb-summary" type="button" data-nav="resumo" id="monthly-summary-button" data-on-click="h20" aria-label="Resumo Financeiro" title="Resumo Financeiro" data-tooltip="Resumo Financeiro"><i class="fas fa-chart-line"></i><span class="gear-text">Resumo financeiro</span></button>
+<button class="sb-gear" type="button" data-nav="configuracoes" data-on-click="h21" aria-label="Configurações"><i class="fas fa-cog"></i><span class="gear-text">Configurações</span></button>
+<button class="sp" type="button" data-nav="perfil" data-on-click="h18" aria-label="Perfil do usuário"><span id="sb-avatar-wrap"></span><span class="spi"><span class="spn" id="sb-name">Usuário</span><span class="spl" id="sb-level">Nível 1</span></span></button>
+</div>
+</aside>
+<main class="main" id="main-content" tabindex="-1">
+<header class="topbar"><div class="tb-left"><button class="menu-btn" id="menu-btn" type="button" data-on-click="h22" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><i class="fas fa-bars"></i></button><h2 class="tb-title" id="tb-title">Dashboard</h2></div><div class="tb-right"><button class="btn btn-success btn-sm" aria-label="Adicionar receita" data-on-click="h23"><i class="fas fa-plus"></i> Receita</button><button class="btn btn-danger btn-sm" aria-label="Adicionar despesa" data-on-click="h24"><i class="fas fa-minus"></i> Despesa</button></div></header>
+<div id="pg-dashboard" class="page a"></div>
+<div id="pg-transacoes" class="page"></div>
+<div id="pg-metas" class="page"></div>
+<div id="pg-mercado" class="page"></div>
+<div id="pg-conquistas" class="page"></div>
+<div id="pg-perfil" class="page"></div>
+<div id="pg-configuracoes" class="page"></div>
+<div id="pg-resumo" class="page"></div>
+</main>
+<button id="assistant-launcher" class="assistant-launcher" type="button" data-on-click="h19" aria-label="Perguntar à Ephyra" aria-controls="assistant-panel" aria-expanded="false"><span class="assistant-launcher-icon" aria-hidden="true"><i class="fas fa-comment-dots"></i></span><span class="assistant-launcher-text">Pergunte à Ephyra</span></button>
+<div id="assistant-backdrop" class="assistant-backdrop" aria-hidden="true" data-on-click="h25">
+<section id="assistant-panel" class="assistant-panel" role="dialog" aria-modal="true" aria-labelledby="assistant-title" tabindex="-1">
+<header class="assistant-header"><div class="assistant-brand"><span class="assistant-logo" aria-hidden="true">E</span><div><h2 id="assistant-title">Assistente Ephyra</h2><p><span class="assistant-status-dot" aria-hidden="true"></span> Local e privado</p></div></div><div class="assistant-header-actions"><button type="button" class="assistant-icon-button" data-on-click="h26" aria-label="Limpar histórico da conversa" title="Limpar histórico"><i class="fas fa-trash"></i></button><button type="button" class="assistant-icon-button" data-on-click="h27" aria-label="Fechar assistente"><i class="fas fa-times"></i></button></div></header>
+<div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+<div id="assistant-typing" class="assistant-typing" aria-label="Ephyra está analisando"><span></span><span></span><span></span></div>
+<div id="assistant-suggestions" class="assistant-suggestions" aria-label="Perguntas sugeridas"></div>
+<form id="assistant-form" class="assistant-form"><label class="sr-only" for="assistant-input">Faça uma pergunta sobre suas finanças</label><textarea id="assistant-input" rows="1" maxlength="500" placeholder="Pergunte sobre seus gastos..." autocomplete="off"></textarea><button id="assistant-send" type="submit" aria-label="Enviar pergunta"><i class="fas fa-paper-plane"></i></button></form>
+<p class="assistant-privacy"><i class="fas fa-lock" aria-hidden="true"></i> Suas informações permanecem neste dispositivo.</p>
+</section>
+</div>
+<nav class="bn" aria-label="Navegação mobile">
+<button class="bni a" type="button" data-nav="dashboard" data-on-click="h13"><i class="fas fa-th-large"></i><span>Início</span></button>
+<button class="bni" type="button" data-nav="transacoes" data-on-click="h14"><i class="fas fa-exchange-alt"></i><span>Extrato</span></button>
+<button class="bni" type="button" data-nav="metas" data-on-click="h15"><i class="fas fa-bullseye"></i><span>Metas</span></button>
+<button class="bni" type="button" data-nav="mercado" data-on-click="h16"><i class="fas fa-globe"></i><span>Mercado</span></button>
+<button class="bni" type="button" data-nav="perfil" data-on-click="h18"><i class="fas fa-user"></i><span>Perfil</span></button>
+</nav>
+</div>
+
+<div id="modal" class="mo" role="dialog" aria-modal="true" aria-labelledby="m-title" aria-hidden="true"><div class="md" tabindex="-1"><div class="mh"><h3 class="mt2" id="m-title"></h3><button class="mc" type="button" data-on-click="h28" aria-label="Fechar"><i class="fas fa-times"></i></button></div><div class="mbd" id="m-body"></div></div></div>
+<div id="photo-viewer" class="mo" data-on-click="h29" role="dialog" aria-modal="true" aria-label="Foto ampliada" aria-hidden="true"><div class="photo-dialog" tabindex="-1" data-on-click="h30"><img id="pv-img" alt="Foto de perfil ampliada"><div><button class="btn btn-outline btn-sm" type="button" data-on-click="h29">Fechar</button></div></div></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script src="js/vendor/chart.umd.min.js"></script>
+<script src="js/vendor/purify.min.js"></script>
+<script src="js/database.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/security.js"></script>
+<script src="js/market/market-api.js"></script>
+<script src="js/market/currency-converter.js"></script>
+<script src="js/market/favorites.js"></script>
+<script src="js/market/alerts.js"></script>
+<script src="js/market/history.js"></script>
+<script src="js/market/market-ui.js"></script>
+<script src="js/market/market.js"></script>
+<script src="js/sidebar/sidebar.js"></script>
+<script src="js/monthly-summary.js"></script>
+<script src="js/onboarding.js"></script>
+<script src="js/assistant.js"></script>
+<script src="js/recommendations.js"></script>
+<script src="js/app.js"></script>
+<script src="js/events.js"></script>
+</body>
+</html>
